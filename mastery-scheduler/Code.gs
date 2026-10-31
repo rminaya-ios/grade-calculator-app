@@ -1,14 +1,16 @@
 /**
- * Mastery Meeting Scheduler — Dr. Ralph Minaya
+ * Student Meeting Scheduler — Dr. Ralph Minaya
  * ------------------------------------------------------------
- * A private booking page for 1:1 mastery-verification meetings.
+ * One booking page for two kinds of 10-minute meetings:
+ *   • Mastery Meeting  — show mastery of missing/past-due work (grade replacement)
+ *   • Office Hours     — get support on current material
  *
  *  • Students see open slots and slots marked "Unavailable" — never names.
  *  • Bookings are stored only in this (private) Google Sheet.
- *  • One link per course:  <web-app-url>?course=MATH1010050
+ *  • One link per course:  <web-app-url>?course=MATH110-03
  *
- * Sheet tabs (created by running setup() once):
- *  - Courses  : one row per availability block. Add rows for other classes.
+ * Sheet tabs:
+ *  - Courses  : one row per availability block. Add rows for other classes/terms.
  *  - Bookings : every booking. To cancel one, change its Status to "Cancelled"
  *               and the slot re-opens automatically.
  */
@@ -17,18 +19,34 @@
 var TZ = 'America/New_York';
 var INSTRUCTOR_NAME = 'Dr. Minaya';
 var SEND_CONFIRMATION_EMAILS = true;   // email the student + you on each booking
-var PREP_MESSAGE =
-  'These meetings are for <b>demonstrating mastery</b>, not for learning the material for the first time. ' +
-  'Before you book, please work with a <b>tutor</b> (Tutoring Center, office hours, or study group) and review ' +
-  'your missing assignments until you can solve the problems and explain your reasoning on your own. ' +
-  'Come ready to show what you know.';
+
+var MEETING_TYPES = {
+  mastery: {
+    label: 'Mastery Meeting',
+    short: 'Show mastery of missing or past-due work so the grade can be replaced.',
+    prep:
+      'Mastery meetings are for <b>demonstrating mastery</b>, not for learning the material for the first time. ' +
+      'Before you book, please work with a <b>tutor</b> (Tutoring Center, office hours, or study group) and review ' +
+      'your missing assignments until you can solve the problems and explain your reasoning on your own. ' +
+      'Grades are replaced after the meeting according to the course grading policy.',
+    readyText: 'I have worked with a tutor and reviewed my missing assignments, and I am ready to demonstrate mastery of the concepts.'
+  },
+  support: {
+    label: 'Office Hours (Support)',
+    short: 'Get help with a topic, assignment, or question from class.',
+    prep:
+      'Office hours are for <b>getting support</b> — you do not need to be behind to book. ' +
+      'Bring your notes and the specific problems or questions you want to work on so we can make the most of 10 minutes.',
+    readyText: ''
+  }
+};
 // =================================
 
 var COURSE_HEADERS = ['Course Code', 'Course Title', 'Room', 'Days', 'Start Time', 'End Time',
   'First Date', 'Last Date', 'Excluded Dates', 'Session (min)', 'Buffer (min)',
-  'Max Slots per Student', 'Active'];
+  'Max Upcoming Slots per Student', 'Active', 'Meeting Types'];
 var BOOKING_HEADERS = ['Timestamp', 'Course Code', 'Date', 'Start', 'End', 'Room',
-  'Student Name', 'Student Email', 'Status'];
+  'Student Name', 'Student Email', 'Status', 'Meeting Type', 'Topic / Notes'];
 
 /* ---------------- Web app entry ---------------- */
 
@@ -36,7 +54,7 @@ function doGet(e) {
   var t = HtmlService.createTemplateFromFile('Index');
   t.courseCode = (e && e.parameter && e.parameter.course) ? String(e.parameter.course) : '';
   return t.evaluate()
-    .setTitle('Schedule a Mastery Meeting')
+    .setTitle('Schedule a Meeting with ' + INSTRUCTOR_NAME)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
@@ -46,11 +64,13 @@ function getCourseView(courseCode) {
   var blocks = getBlocks_(courseCode);
   if (!blocks.length) return { ok: false, error: 'This scheduling link is not active. Please contact ' + INSTRUCTOR_NAME + '.' };
 
-  var taken = takenSlotIds_(blocks[0].code);
+  // You are one person: a time booked in ANY course is unavailable in every course.
+  var taken = {};
+  activeBookings_().forEach(function (r) { taken[r.id] = 1; });
   var now = nowKey_();
   var byDate = {};
   generateSlots_(blocks).forEach(function (s) {
-    if (s.date + ' ' + s.start24 <= now) return;            // hide past slots
+    if (s.id <= now) return;                                // hide past slots
     (byDate[s.date] = byDate[s.date] || { date: s.date, label: s.dateLabel, slots: [] })
       .slots.push({ id: s.id, label: s.label, room: s.room, available: !taken[s.id] });
   });
@@ -61,41 +81,50 @@ function getCourseView(courseCode) {
     code: blocks[0].code,
     title: blocks[0].title,
     maxPerStudent: blocks[0].maxPerStudent,
-    prepMessage: PREP_MESSAGE,
     instructor: INSTRUCTOR_NAME,
+    types: blocks[0].types.map(function (k) {
+      var t = MEETING_TYPES[k];
+      return { key: k, label: t.label, short: t.short, prep: t.prep, readyText: t.readyText };
+    }),
     days: days
   };
 }
 
 /** Called by the page to book a slot. */
-function bookSlot(courseCode, slotId, name, email) {
+function bookSlot(courseCode, slotId, name, email, typeKey, topic, ready) {
   name = String(name || '').trim().replace(/\s+/g, ' ');
   email = String(email || '').trim().toLowerCase();
+  topic = String(topic || '').trim().replace(/\s+/g, ' ').slice(0, 300);
   if (name.length < 2) return { ok: false, error: 'Please enter your full name.' };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'Please enter a valid email address.' };
 
   var blocks = getBlocks_(courseCode);
   if (!blocks.length) return { ok: false, error: 'This scheduling link is not active.' };
   var code = blocks[0].code;
+  if (blocks[0].types.indexOf(typeKey) < 0) return { ok: false, error: 'Please choose a meeting type.' };
+  var type = MEETING_TYPES[typeKey];
+  if (type.readyText && !ready) return { ok: false, error: 'Please confirm you are ready to demonstrate mastery.' };
+
   var slot = generateSlots_(blocks).filter(function (s) { return s.id === slotId; })[0];
   if (!slot) return { ok: false, error: 'That time is no longer offered. Please pick another.' };
-  if (slot.date + ' ' + slot.start24 <= nowKey_()) return { ok: false, error: 'That time has already passed.' };
+  var now = nowKey_();
+  if (slot.id <= now) return { ok: false, error: 'That time has already passed.' };
 
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    var rows = activeBookings_(code);
+    var rows = activeBookings_();
     if (rows.some(function (r) { return r.id === slotId; })) {
       return { ok: false, taken: true, error: 'Sorry — someone just booked that time. Please choose another.' };
     }
-    var mine = rows.filter(function (r) { return r.email === email; });
-    if (mine.length >= blocks[0].maxPerStudent) {
-      return { ok: false, error: 'You already have ' + mine.length + ' meeting(s) booked, which is the maximum (' +
-        blocks[0].maxPerStudent + '). To change a time, email ' + INSTRUCTOR_NAME + '.' };
+    var upcoming = rows.filter(function (r) { return r.code === normCode_(code) && r.email === email && r.id > now; });
+    if (upcoming.length >= blocks[0].maxPerStudent) {
+      return { ok: false, error: 'You already have ' + upcoming.length + ' upcoming meeting(s), which is the maximum (' +
+        blocks[0].maxPerStudent + '). You can book again after your meeting, or email ' + INSTRUCTOR_NAME + ' to change a time.' };
     }
     bookingsSheet_().appendRow([
       Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm:ss'),
-      code, slot.date, slot.start24, slot.end24, slot.room, name, email, 'Booked'
+      code, slot.date, slot.start24, slot.end24, slot.room, name, email, 'Booked', type.label, topic
     ]);
     SpreadsheetApp.flush();
   } finally {
@@ -105,44 +134,40 @@ function bookSlot(courseCode, slotId, name, email) {
   var when = slot.dateLabel + ', ' + slot.label;
   if (SEND_CONFIRMATION_EMAILS) {
     try {
+      var bring = typeKey === 'mastery'
+        ? 'Please arrive on time and be ready to work through problems from your missing assignments and explain your reasoning.'
+        : 'Please arrive on time and bring your notes and the specific questions you want to work on.';
       MailApp.sendEmail({
         to: email,
-        subject: 'Confirmed: Mastery Meeting with ' + INSTRUCTOR_NAME + ' — ' + when,
-        htmlBody: 'Hello ' + esc_(name) + ',<br><br>Your 10-minute mastery meeting is confirmed.<br><br>' +
+        subject: 'Confirmed: ' + type.label + ' with ' + INSTRUCTOR_NAME + ' — ' + when,
+        htmlBody: 'Hello ' + esc_(name) + ',<br><br>Your 10-minute <b>' + esc_(type.label) + '</b> is confirmed.<br><br>' +
           '<b>Course:</b> ' + esc_(blocks[0].title) + '<br><b>When:</b> ' + esc_(when) + '<br><b>Where:</b> ' + esc_(slot.room) +
-          '<br><br>Please arrive on time and be ready to work through problems from your missing assignments ' +
-          'and explain your reasoning. If you need to cancel or change your time, reply to this email.<br><br>' +
+          (topic ? '<br><b>Topic:</b> ' + esc_(topic) : '') +
+          '<br><br>' + bring + ' If you need to cancel or change your time, reply to this email.<br><br>' +
           'See you then!<br>' + INSTRUCTOR_NAME
       });
       MailApp.sendEmail(Session.getEffectiveUser().getEmail(),
-        'New mastery meeting: ' + name + ' — ' + code + ' — ' + when,
-        name + ' (' + email + ') booked ' + when + ' in ' + slot.room + '.');
+        type.label + ': ' + name + ' — ' + code + ' — ' + when,
+        name + ' (' + email + ') booked a ' + type.label + ' for ' + when + ' in ' + slot.room + '.' +
+        (topic ? '\nTopic: ' + topic : ''));
     } catch (err) { /* booking is saved even if email fails */ }
   }
-  return { ok: true, when: when, room: slot.room };
+  return { ok: true, when: when, room: slot.room, type: type.label };
 }
 
 /* ---------------- One-time setup ---------------- */
 
-/** Run once from the Apps Script editor: creates the tabs and a starter row. */
+/** Run once from the Apps Script editor to authorize. Creates tabs only if missing. */
 function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var c = ss.getSheetByName('Courses') || ss.insertSheet('Courses');
-  if (c.getLastRow() === 0) {
-    c.getRange(1, 1, 1, COURSE_HEADERS.length).setValues([COURSE_HEADERS]).setFontWeight('bold');
-    c.getRange('A:M').setNumberFormat('@');   // keep dates/times as plain text
-    c.appendRow(['MATH1010050', 'MATH 1010 – Intermediate Algebra', 'Room 621', 'Tue, Thu',
-      '4:10 PM', '5:20 PM', '2026-11-01', '2026-11-14', '2026-11-03', '10', '5', '2', 'TRUE']);
-    c.setFrozenRows(1);
-  }
-  var b = ss.getSheetByName('Bookings') || ss.insertSheet('Bookings');
-  if (b.getLastRow() === 0) {
-    b.getRange(1, 1, 1, BOOKING_HEADERS.length).setValues([BOOKING_HEADERS]).setFontWeight('bold');
-    b.getRange('A:I').setNumberFormat('@');
-    b.setFrozenRows(1);
-  }
-  var s1 = ss.getSheetByName('Sheet1');
-  if (s1 && ss.getSheets().length > 2 && s1.getLastRow() === 0) ss.deleteSheet(s1);
+  [['Courses', COURSE_HEADERS], ['Bookings', BOOKING_HEADERS]].forEach(function (p) {
+    var sh = ss.getSheetByName(p[0]) || ss.insertSheet(p[0]);
+    if (sh.getLastRow() === 0) {
+      sh.getRange(1, 1, 1, p[1].length).setValues([p[1]]).setFontWeight('bold');
+      sh.getRange(1, 1, sh.getMaxRows(), p[1].length).setNumberFormat('@');  // plain text
+      sh.setFrozenRows(1);
+    }
+  });
 }
 
 /* ---------------- Helpers ---------------- */
@@ -183,8 +208,18 @@ function parseBlock_(r) {
     duration: parseInt(r[9], 10) || 10,
     buffer: parseInt(r[10], 10) || 0,
     maxPerStudent: parseInt(r[11], 10) || 1,
-    active: /^(true|yes|y|1|x)$/i.test(String(r[12] || 'TRUE').trim())
+    active: /^(true|yes|y|1|x)$/i.test(String(r[12] || 'TRUE').trim()),
+    types: parseTypes_(r[13])
   };
+}
+
+/** "Mastery, Office Hours" -> ['mastery','support']. Blank = both. */
+function parseTypes_(s) {
+  s = String(s || '').toLowerCase();
+  var out = [];
+  if (!s.trim() || /mast/.test(s)) out.push('mastery');
+  if (!s.trim() || /office|support|help/.test(s)) out.push('support');
+  return out.length ? out : ['mastery', 'support'];
 }
 
 function generateSlots_(blocks) {
@@ -208,22 +243,17 @@ function generateSlots_(blocks) {
   return out.sort(function (a, b) { return a.id < b.id ? -1 : 1; });
 }
 
-function activeBookings_(code) {
+/** All non-cancelled bookings, every course. */
+function activeBookings_() {
   var sh = bookingsSheet_();
   if (sh.getLastRow() < 2) return [];
-  return sh.getRange(2, 1, sh.getLastRow() - 1, BOOKING_HEADERS.length).getDisplayValues()
+  return sh.getRange(2, 1, sh.getLastRow() - 1, 9).getDisplayValues()
     .filter(function (r) {
-      return normCode_(r[1]) === normCode_(code) && !/cancel/i.test(r[8]);
+      return r[1] && !/cancel/i.test(r[8]);
     })
     .map(function (r) {
-      return { id: (parseDate_(r[2]) || r[2]) + ' ' + hhmm_(parseTime_(r[3])), email: String(r[7]).trim().toLowerCase() };
+      return { code: normCode_(r[1]), id: (parseDate_(r[2]) || r[2]) + ' ' + hhmm_(parseTime_(r[3])), email: String(r[7]).trim().toLowerCase() };
     });
-}
-
-function takenSlotIds_(code) {
-  var m = {};
-  activeBookings_(code).forEach(function (r) { m[r.id] = 1; });
-  return m;
 }
 
 function nowKey_() { return Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm'); }
