@@ -27,9 +27,11 @@ Your Google Sheet **"Mastery Meeting Scheduler – Dr. Minaya"** has two tabs:
 
 | Course | Link |
 |---|---|
-| MATH 1010 (CCC) | `…/exec?course=MATH1010050` |
-| MATH 110-03 (USJ) | `…/exec?course=MATH110-03` |
-| MATH 110-05 (USJ) | `…/exec?course=MATH110-05` |
+| MATH 1010 (CCC) | https://script.google.com/macros/s/AKfycbz140asYZmqTltqY4n7WWK54tHqljWeWiubskvFCaQpjw16V2TdbHANPbCApW5W3JBm0A/exec?course=MATH1010050 |
+| MATH 110-03 (USJ) | https://script.google.com/macros/s/AKfycbz140asYZmqTltqY4n7WWK54tHqljWeWiubskvFCaQpjw16V2TdbHANPbCApW5W3JBm0A/exec?course=MATH110-03 |
+| MATH 110-05 (USJ) | https://script.google.com/macros/s/AKfycbz140asYZmqTltqY4n7WWK54tHqljWeWiubskvFCaQpjw16V2TdbHANPbCApW5W3JBm0A/exec?course=MATH110-05 |
+
+Deployed Oct 31, 2026 (Version 1).
 
 ## How it works
 - **One schedule for you:** a time booked in any course shows as *Unavailable* in every course. If 110-03 and 110-05 share office hours, they can't double-book you.
