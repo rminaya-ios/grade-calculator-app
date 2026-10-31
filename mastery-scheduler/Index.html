@@ -21,6 +21,7 @@
   .prep { border-left-width:6px; }
   .prep.mastery { background:var(--warn-bg); border-color:var(--warn-line); }
   .prep.support { background:var(--info-bg); border-color:var(--info-line); }
+  .prep.fair { background:#f1f5f9; border-color:#64748b; font-size:.93rem; }
   .day h3 { margin:0 0 10px; font-size:1.02rem; }
   .slots { display:grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap:8px; }
   .slot { border:1px solid var(--brand); background:#fff; color:var(--brand); border-radius:8px; padding:10px 8px; font-size:.95rem; cursor:pointer; text-align:center; font-weight:600; }
@@ -74,6 +75,8 @@
       <input type="email" id="email" autocomplete="email">
       <label for="topic">What would you like to work on? <span class="muted">(optional)</span></label>
       <input type="text" id="topic" maxlength="300" placeholder="e.g., Section 4.2 #15–20, solving systems of equations">
+      <div class="card prep fair" style="margin:16px 0 0;padding:12px 14px"><b id="fairTitle"></b><div id="fairText" style="margin-top:4px"></div></div>
+      <label class="check"><input type="checkbox" id="fair"><span id="fairCheck"></span></label>
       <label class="check hidden" id="readyRow"><input type="checkbox" id="ready"><span id="readyText"></span></label>
       <button class="primary" id="bookBtn" disabled>Book this time</button>
       <div class="err" id="err"></div>
@@ -104,7 +107,10 @@
     if (!v.ok) { $('subtitle').textContent = v.error; return; }
     $('title').textContent = v.title;
     $('subtitle').textContent = '10-minute, in-person meetings with ' + v.instructor +
-      '. You may have up to ' + v.maxPerStudent + ' upcoming meeting' + (v.maxPerStudent > 1 ? 's' : '') + ' at a time.';
+      '. You may book up to ' + v.maxPerStudent + ' slot' + (v.maxPerStudent > 1 ? 's' : '') + ' per day — please book only what you need.';
+    $('fairTitle').textContent = v.fairUse.title;
+    $('fairText').innerHTML = v.fairUse.text;
+    $('fairCheck').textContent = v.fairUse.check;
     $('types').innerHTML = v.types.map(function (t) {
       return '<button class="type' + (type && type.key === t.key ? ' sel' : '') + '" data-key="' + esc(t.key) + '"><b>' +
         esc(t.label) + '</b><span class="muted">' + esc(t.short) + '</span></button>';
@@ -172,10 +178,11 @@
 
   function validate() {
     var readyOk = !type || !type.readyText || $('ready').checked;
-    $('bookBtn').disabled = !(type && selected && $('name').value.trim() && $('email').value.trim() && readyOk);
+    $('bookBtn').disabled = !(type && selected && $('name').value.trim() && $('email').value.trim() && readyOk && $('fair').checked);
   }
   ['name', 'email'].forEach(function (id) { $(id).addEventListener('input', validate); });
   $('ready').addEventListener('change', validate);
+  $('fair').addEventListener('change', validate);
 
   $('bookBtn').onclick = function () {
     $('bookBtn').disabled = true; $('bookBtn').textContent = 'Booking…'; $('err').textContent = '';
@@ -193,11 +200,11 @@
     }).withFailureHandler(function () {
       $('bookBtn').textContent = 'Book this time'; validate();
       $('err').textContent = 'Could not reach the server. Please try again.';
-    }).bookSlot(COURSE, selected.id, $('name').value, $('email').value, type.key, $('topic').value, $('ready').checked);
+    }).bookSlot(COURSE, selected.id, $('name').value, $('email').value, type.key, $('topic').value, $('ready').checked, $('fair').checked);
   };
 
   $('againBtn').onclick = function () {
-    $('done').classList.add('hidden'); $('topic').value = ''; $('ready').checked = false;
+    $('done').classList.add('hidden'); $('topic').value = ''; $('ready').checked = false; $('fair').checked = false;
     selected = null; validate(); load();
   };
 

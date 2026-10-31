@@ -33,7 +33,8 @@ Your Google Sheet **"Mastery Meeting Scheduler – Dr. Minaya"** has two tabs:
 
 ## How it works
 - **One schedule for you:** a time booked in any course shows as *Unavailable* in every course. If 110-03 and 110-05 share office hours, they can't double-book you.
-- **Limit:** each student can have **2 upcoming** 10-minute slots at a time. They can book 2 in a row for a 20-minute session. Once a meeting has passed, they can book again.
+- **Limit:** each student can book up to **2 ten-minute slots per day**, for example 2 in a row for a 20-minute session. There is no limit for the semester.
+- **Fair use:** every student must check *"I will book only the time I need and cancel promptly…"* before booking. You can edit the wording in `FAIR_USE` at the top of `Code.gs`.
 - **Cancel or free up a slot:** in **Bookings**, change the row's **Status** to `Cancelled`. The slot reopens right away.
 - **Emails:** each booking sends a confirmation to the student and a notice to you, including the meeting type and topic.
 
@@ -45,7 +46,7 @@ Your Google Sheet **"Mastery Meeting Scheduler – Dr. Minaya"** has two tabs:
 | First / Last Date | `2026-11-01` / `2026-12-15` | Booking window. You can also write `11/1/2026`. |
 | Excluded Dates | `2026-11-25, 2026-11-27` | Holidays and days off |
 | Session / Buffer (min) | `10` / `5` | |
-| Max Upcoming Slots per Student | `2` | |
+| Max Slots per Student per Day | `2` | |
 | Active | `TRUE` / `FALSE` | `FALSE` turns the link off. |
 | Meeting Types | `Mastery, Office Hours` | Leave blank for both, or list just one. |
 

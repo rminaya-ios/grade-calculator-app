@@ -40,11 +40,18 @@ var MEETING_TYPES = {
     readyText: ''
   }
 };
+// Shown on every booking; students must check the box to book.
+var FAIR_USE_TITLE = 'Please book fairly';
+var FAIR_USE =
+  'Office-hour time is shared by all of my students. Book only the time you truly need ' +
+  '(up to <b>2 slots per day</b>), and if you can no longer attend, cancel right away by replying to your ' +
+  'confirmation email so a classmate can use that time. Holding slots you don\'t need keeps others from getting support.';
+var FAIR_USE_CHECK = 'I will book only the time I need and cancel promptly if I cannot attend, so other students can get support too.';
 // =================================
 
 var COURSE_HEADERS = ['Course Code', 'Course Title', 'Room', 'Days', 'Start Time', 'End Time',
   'First Date', 'Last Date', 'Excluded Dates', 'Session (min)', 'Buffer (min)',
-  'Max Upcoming Slots per Student', 'Active', 'Meeting Types'];
+  'Max Slots per Student per Day', 'Active', 'Meeting Types'];
 var BOOKING_HEADERS = ['Timestamp', 'Course Code', 'Date', 'Start', 'End', 'Room',
   'Student Name', 'Student Email', 'Status', 'Meeting Type', 'Topic / Notes'];
 
@@ -82,6 +89,7 @@ function getCourseView(courseCode) {
     title: blocks[0].title,
     maxPerStudent: blocks[0].maxPerStudent,
     instructor: INSTRUCTOR_NAME,
+    fairUse: { title: FAIR_USE_TITLE, text: FAIR_USE, check: FAIR_USE_CHECK },
     types: blocks[0].types.map(function (k) {
       var t = MEETING_TYPES[k];
       return { key: k, label: t.label, short: t.short, prep: t.prep, readyText: t.readyText };
@@ -91,7 +99,7 @@ function getCourseView(courseCode) {
 }
 
 /** Called by the page to book a slot. */
-function bookSlot(courseCode, slotId, name, email, typeKey, topic, ready) {
+function bookSlot(courseCode, slotId, name, email, typeKey, topic, ready, fair) {
   name = String(name || '').trim().replace(/\s+/g, ' ');
   email = String(email || '').trim().toLowerCase();
   topic = String(topic || '').trim().replace(/\s+/g, ' ').slice(0, 300);
@@ -104,6 +112,7 @@ function bookSlot(courseCode, slotId, name, email, typeKey, topic, ready) {
   if (blocks[0].types.indexOf(typeKey) < 0) return { ok: false, error: 'Please choose a meeting type.' };
   var type = MEETING_TYPES[typeKey];
   if (type.readyText && !ready) return { ok: false, error: 'Please confirm you are ready to demonstrate mastery.' };
+  if (!fair) return { ok: false, error: 'Please agree to book fairly before booking.' };
 
   var slot = generateSlots_(blocks).filter(function (s) { return s.id === slotId; })[0];
   if (!slot) return { ok: false, error: 'That time is no longer offered. Please pick another.' };
@@ -117,10 +126,11 @@ function bookSlot(courseCode, slotId, name, email, typeKey, topic, ready) {
     if (rows.some(function (r) { return r.id === slotId; })) {
       return { ok: false, taken: true, error: 'Sorry — someone just booked that time. Please choose another.' };
     }
-    var upcoming = rows.filter(function (r) { return r.code === normCode_(code) && r.email === email && r.id > now; });
-    if (upcoming.length >= blocks[0].maxPerStudent) {
-      return { ok: false, error: 'You already have ' + upcoming.length + ' upcoming meeting(s), which is the maximum (' +
-        blocks[0].maxPerStudent + '). You can book again after your meeting, or email ' + INSTRUCTOR_NAME + ' to change a time.' };
+    // Daily limit: max N slots per student on the same day (any course).
+    var sameDay = rows.filter(function (r) { return r.email === email && r.id.slice(0, 10) === slot.date; });
+    if (sameDay.length >= blocks[0].maxPerStudent) {
+      return { ok: false, error: 'You already have ' + sameDay.length + ' slot(s) on ' + slot.dateLabel +
+        ', which is the daily maximum (' + blocks[0].maxPerStudent + '). Please choose another day so classmates can get support too.' };
     }
     bookingsSheet_().appendRow([
       Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm:ss'),
