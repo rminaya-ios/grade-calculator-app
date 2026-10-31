@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  :root { --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --brand:#1e3a8a; --brand-soft:#eef2ff; --ok:#047857; --warn-bg:#fffbeb; --warn-line:#f59e0b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; color:var(--ink); background:#f8fafc; line-height:1.45; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; color: var(--brand); }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px; }
+  .prep { background:var(--warn-bg); border:1px solid var(--warn-line); border-left-width:6px; }
+  .prep h2 { margin:0 0 6px; font-size:1.05rem; }
+  .day h3 { margin:0 0 10px; font-size:1.05rem; }
+  .slots { display:grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap:8px; }
+  .slot { border:1px solid var(--brand); background:#fff; color:var(--brand); border-radius:8px; padding:10px 8px; font-size:.95rem; cursor:pointer; text-align:center; font-weight:600; }
+  .slot:hover, .slot:focus { background:var(--brand-soft); outline:none; }
+  .slot.sel { background:var(--brand); color:#fff; }
+  .slot[disabled] { border-color:var(--line); background:#f3f4f6; color:#9ca3af; cursor:not-allowed; font-weight:400; }
+  .slot small { display:block; font-size:.75rem; font-weight:400; }
+  label { display:block; font-weight:600; margin:12px 0 4px; }
+  input[type=text], input[type=email] { width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px; font-size:1rem; }
+  .check { display:flex; gap:10px; align-items:flex-start; font-weight:400; margin-top:14px; }
+  .check input { margin-top:4px; width:18px; height:18px; }
+  button.primary { margin-top:16px; background:var(--brand); color:#fff; border:0; border-radius:8px; padding:12px 18px; font-size:1rem; font-weight:600; cursor:pointer; }
+  button.primary[disabled] { opacity:.5; cursor:not-allowed; }
+  .err { color:#b91c1c; margin-top:10px; }
+  .ok h2 { color:var(--ok); margin-top:0; }
+  .muted { color:var(--muted); font-size:.9rem; }
+  .legend { display:flex; gap:16px; font-size:.85rem; color:var(--muted); margin-bottom:12px; flex-wrap:wrap; }
+  .sw { display:inline-block; width:14px; height:14px; border-radius:3px; vertical-align:-2px; margin-right:4px; border:1px solid var(--brand); }
+  .sw.na { background:#f3f4f6; border-color:var(--line); }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">Schedule a Mastery Meeting</h1>
+  <p class="sub" id="subtitle">Loading available times…</p>
+
+  <div id="main" class="hidden">
+    <div class="card prep">
+      <h2>Before you book</h2>
+      <div id="prep"></div>
+    </div>
+
+    <div class="legend"><span><span class="sw"></span>Available</span><span><span class="sw na"></span>Unavailable</span></div>
+    <div id="days"></div>
+
+    <div class="card hidden" id="form">
+      <h2 style="margin-top:0;font-size:1.1rem">Confirm your meeting</h2>
+      <p id="picked" style="margin:0"></p>
+      <label for="name">Full name</label>
+      <input type="text" id="name" autocomplete="name">
+      <label for="email">Email</label>
+      <input type="email" id="email" autocomplete="email">
+      <label class="check"><input type="checkbox" id="ready">
+        <span>I have worked with a tutor and reviewed my missing assignments, and I am ready to demonstrate mastery of the concepts.</span></label>
+      <button class="primary" id="bookBtn" disabled>Book this time</button>
+      <div class="err" id="err"></div>
+    </div>
+  </div>
+
+  <div class="card ok hidden" id="done">
+    <h2>You're booked!</h2>
+    <p id="doneText"></p>
+    <p class="muted">A confirmation email is on its way. If you need to change or cancel, reply to that email.</p>
+    <button class="primary" id="againBtn">Book another time</button>
+  </div>
+</div>
+
+<script>
+  var COURSE = <?= courseCode ?>;
+  var view = null, selected = null;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function load() {
+    google.script.run.withSuccessHandler(render).withFailureHandler(fail).getCourseView(COURSE);
+  }
+  function fail(e) { $('subtitle').textContent = 'Something went wrong loading the schedule. Please refresh the page.'; }
+
+  function render(v) {
+    view = v;
+    if (!v.ok) { $('subtitle').textContent = v.error; return; }
+    $('title').textContent = 'Mastery Meeting — ' + v.title;
+    $('subtitle').textContent = '10-minute, in-person meetings with ' + v.instructor +
+      '. You may book up to ' + v.maxPerStudent + ' time' + (v.maxPerStudent > 1 ? 's' : '') + '.';
+    $('prep').innerHTML = v.prepMessage;
+    var html = '';
+    if (!v.days.length) html = '<div class="card">There are no upcoming times right now. Please check back later or contact ' + esc(v.instructor) + '.</div>';
+    v.days.forEach(function (d) {
+      var open = d.slots.filter(function (s) { return s.available; }).length;
+      html += '<div class="card day"><h3>' + esc(d.label) + ' <span class="muted">· ' + open + ' open · ' + esc(d.slots[0].room) + '</span></h3><div class="slots">';
+      d.slots.forEach(function (s) {
+        html += s.available
+          ? '<button class="slot' + (selected && selected.id === s.id ? ' sel' : '') + '" data-id="' + esc(s.id) + '" data-label="' + esc(d.label + ', ' + s.label) + '" data-room="' + esc(s.room) + '">' + esc(s.label) + '</button>'
+          : '<button class="slot" disabled aria-label="' + esc(s.label) + ' unavailable">' + esc(s.label) + '<small>Unavailable</small></button>';
+      });
+      html += '</div></div>';
+    });
+    $('days').innerHTML = html;
+    Array.prototype.forEach.call(document.querySelectorAll('.slot[data-id]'), function (b) {
+      b.onclick = function () { pick(b.dataset.id, b.dataset.label, b.dataset.room); };
+    });
+    $('main').classList.remove('hidden');
+  }
+
+  function pick(id, label, room) {
+    selected = { id: id, label: label, room: room };
+    Array.prototype.forEach.call(document.querySelectorAll('.slot[data-id]'), function (b) {
+      b.classList.toggle('sel', b.dataset.id === id);
+    });
+    $('picked').innerHTML = '<b>' + esc(label) + '</b> · ' + esc(room);
+    $('err').textContent = '';
+    $('form').classList.remove('hidden');
+    $('form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    validate();
+  }
+
+  function validate() {
+    $('bookBtn').disabled = !(selected && $('name').value.trim() && $('email').value.trim() && $('ready').checked);
+  }
+  ['name', 'email'].forEach(function (id) { $(id).addEventListener('input', validate); });
+  $('ready').addEventListener('change', validate);
+
+  $('bookBtn').onclick = function () {
+    $('bookBtn').disabled = true; $('bookBtn').textContent = 'Booking…'; $('err').textContent = '';
+    google.script.run.withSuccessHandler(function (r) {
+      $('bookBtn').textContent = 'Book this time';
+      if (r.ok) {
+        $('main').classList.add('hidden'); $('form').classList.add('hidden');
+        $('doneText').innerHTML = '<b>' + esc(r.when) + '</b><br>' + esc(r.room);
+        $('done').classList.remove('hidden');
+        selected = null;
+      } else {
+        $('err').textContent = r.error; validate();
+        if (r.taken) { selected = null; $('form').classList.add('hidden'); load(); }
+      }
+    }).withFailureHandler(function () {
+      $('bookBtn').textContent = 'Book this time'; validate();
+      $('err').textContent = 'Could not reach the server. Please try again.';
+    }).bookSlot(COURSE, selected.id, $('name').value, $('email').value);
+  };
+
+  $('againBtn').onclick = function () {
+    $('done').classList.add('hidden'); $('ready').checked = false; validate(); load();
+  };
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  load();
+</script>
+</body>
+</html>
